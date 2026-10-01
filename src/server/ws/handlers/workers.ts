@@ -27,12 +27,13 @@ export const workerHandlers = {
     }
     const model = msg.model === undefined ? undefined : str(msg.model, OPEN_CODE_MODEL_MAX + 1);
     const effort = isAgentEffort(msg.effort) ? msg.effort : undefined;
-    // Other floors' projects to work in too, each in a worktree of its own.
-    const repos: RepoSource[] = [];
+    // Other floors' projects to work in too, each in a worktree of its own. On a workspace floor, a
+    // worker in its own worktree gets one of every checkout there; another workspace floor brings all of its.
+    const repos: RepoSource[] = msg.worktree === true ? floor.subRepos() : [];
     for (const id of Array.isArray(msg.repos) ? [...new Set(msg.repos.slice(0, MAX_REPOS + 1).map((x) => str(x, 64)))] : []) {
       const other = ctx.floors.get(id);
       if (!other || other === floor) return ctx.warn(c, other ? "The worker's own floor's project is already in its workspace" : 'That project is no longer in the building');
-      repos.push({ floor: other.id, name: other.def.name, repo: other.def.repo, dir: other.dir });
+      repos.push({ floor: other.id, name: other.def.name, repo: other.def.repo, dir: other.workers.repoDir }, ...other.subRepos());
     }
     // A shell is theirs too: `claude auth login` or `gh auth login` typed there signs them in.
     const hire = () => {
@@ -43,8 +44,8 @@ export const workerHandlers = {
       else ctx.toastFloor(floor, kind === 'shell' ? `${who} opened a shell at a desk` : `${who} hired ${r.name}${issue ? ` for issue #${issue}` : r.prompt ? ' with a task' : ''}${across}`);
       if (typeof r !== 'string' && issue) ctx.takeIssue(c, floor, issue);
     };
-    // Every project it gets a worktree of starts from what's on GitHub.
-    const fresh = [floor, ...repos.map((x) => ctx.floors.get(x.floor)!)];
+    // Every project it gets a worktree of starts from what's on GitHub (a floor fetches its workspace's checkouts too).
+    const fresh = [floor, ...repos.flatMap((x) => ctx.floors.get(x.floor) ?? [])];
     ctx.withSignIn(c, kind === 'agent' ? ctx.claudeFor(msg.provider ?? floor.workers.officeDefault.provider) : undefined, () => (msg.worktree === true ? ctx.withFreshBase(c, fresh, hire) : hire()));
   },
   'worker.resume'(ctx, c, msg) {

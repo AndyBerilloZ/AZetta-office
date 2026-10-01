@@ -4,10 +4,10 @@ import path from 'node:path';
 import type { ChangesState, FloorInfo, PeerInfo, ProjectInfo, ServerMsg, WorkerInfo } from '../shared/protocol.js';
 import { isBusy } from '../shared/status.js';
 import { DESK_BY_ID } from '../shared/layout.js';
-import type { FloorDef } from './building.js';
+import { primaryDir, type FloorDef } from './building.js';
 import { excludeFromGit } from './config.js';
 import { agentProviders, configuredProvider } from './agents.js';
-import { WorkerManager, workedMs, type HookEnv, type RunAs } from './workers.js';
+import { WorkerManager, workedMs, type HookEnv, type RepoSource, type RunAs } from './workers.js';
 import { GitHub, MergeWatch } from './github.js';
 import type { GhAs } from './signins.js';
 import { TaskQueue } from './queue.js';
@@ -84,20 +84,25 @@ const LANDED_DELAY_MS = 1500;
 const IDLE_REFRESH_MS = 10 * 60_000;
 const REFRESH_MS = 90_000;
 
-/** What `git` says about a checkout: its name, branch and origin for the top bar. */
-export function projectInfo(dir: string, name: string, agentCmd: string, agentArgs: string[]): ProjectInfo {
+/**
+ * What `git` says about a checkout: its name, branch and origin for the top bar. On a workspace floor
+ * (see FloorDef.repos) the branch and origin are its main project's, and `repos` names its checkouts.
+ */
+export function projectInfo(def: Pick<FloorDef, 'dir' | 'name' | 'repos'>, agentCmd: string, agentArgs: string[]): ProjectInfo {
+  const cwd = primaryDir(def);
   const git = (args: string[]) => {
     try {
-      return execFileSync('git', args, { cwd: dir, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
+      return execFileSync('git', args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
     } catch {
       return undefined;
     }
   };
   return {
-    name,
-    dir,
+    name: def.name,
+    dir: def.dir,
     branch: git(['rev-parse', '--abbrev-ref', 'HEAD']),
     remote: git(['remote', 'get-url', 'origin']),
+    repos: def.repos?.map((r) => r.name),
     agentCmd: [agentCmd, ...agentArgs].join(' '),
     defaultProvider: configuredProvider(agentCmd),
     agentProviders: agentProviders(configuredProvider(agentCmd)),
@@ -152,7 +157,7 @@ export class Floor {
     const dataDir = path.join(def.dir, '.agent-office');
     mkdirSync(dataDir, { recursive: true, mode: 0o700 });
     excludeFromGit(def.dir);
-    this.project = projectInfo(def.dir, def.name, ctx.agentCmd, ctx.agentArgs);
+    this.project = projectInfo(def, ctx.agentCmd, ctx.agentArgs);
     this.docs = new Docs(def.dir);
     // Before the workers and the dog: the back office's desks are only there once it's built.
     this.plan = new FloorPlanStore(dataDir);
@@ -203,6 +208,7 @@ export class Floor {
       ctx.prompts,
       ctx.runAs,
       ctx.dshProfile,
+      def.repos,
     );
     this.workers.wing = () => this.plan.wing;
 
@@ -261,7 +267,7 @@ export class Floor {
         write: (id, data, by) => this.workers.write(id, data, by),
         kill: (id) => this.workers.kill(id),
       },
-      this.project.branch ? new Worktrees(def.dir) : undefined,
+      this.project.branch ? new Worktrees(primaryDir(def), def.dir) : undefined,
       {
         update: (state) => ctx.emit(this, { t: 'meeting', state }),
         toast: (text, level) => ctx.toast(this, text, level),
@@ -314,6 +320,15 @@ export class Floor {
     this.timer = setInterval(() => {
       if (this.active() || Date.now() - this.github.issues.fetchedAt > IDLE_REFRESH_MS) void this.github.refresh();
     }, REFRESH_MS);
+  }
+
+  /**
+   * On a workspace floor, the checkouts besides the main one, for a worker hired here in its own
+   * worktree to work in too (see WorkerInfo.repos); none on a floor that is one checkout. Their
+   * `floor` is `<floor>:<name>`: no floor of its own, so nothing looks one up.
+   */
+  subRepos(): RepoSource[] {
+    return (this.def.repos ?? []).slice(1).map((r) => ({ floor: `${this.id}:${r.name}`, name: r.name, repo: r.repo, dir: r.dir }));
   }
 
   /** Pull request `n` merged (`by` someone, from the PR window): the gong rings, once per PR. */

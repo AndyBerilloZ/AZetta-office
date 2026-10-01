@@ -48,7 +48,14 @@ export function openAsk(opts: AskOptions) {
   } catch {
     // storage blocked
   }
-  const wtRow = h('label.ask-wt', { for: 'ask-wt', title: 'Isolate the new worker on its own branch so parallel workers never collide' }, wtBox, '🌿 Work in its own git worktree & branch');
+  // On a workspace floor, a worktree is one of every checkout there, on one branch (see ProjectInfo.repos).
+  const across = store.project?.repos;
+  const wtRow = h(
+    'label.ask-wt',
+    { for: 'ask-wt', title: across?.length ? `A worktree of each of ${across.join(', ')}, all on one branch, with a pull request in each` : 'Isolate the new worker on its own branch so parallel workers never collide' },
+    wtBox,
+    across?.length ? `🌿 Work in its own git worktrees & branch (${across.join(', ')})` : '🌿 Work in its own git worktree & branch',
+  );
   const repos = repoPicker(opts.worktreeOption ? opts.repoOptions : undefined, wtBox);
   const provider: ProviderPicker | null = opts.providerOption ? providerPicker(store.project, 'ask-provider') : null;
   const submit = h('button.btn.primary', { type: 'submit' });

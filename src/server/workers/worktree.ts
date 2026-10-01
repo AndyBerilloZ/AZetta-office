@@ -87,7 +87,7 @@ export class WorkerTrees {
       if (twin) return `${r.name} is the same repository as ${twin}`;
       seen.set(common, r.name);
     }
-    const names = workspaceNames([this.ctx.dir, ...repos.map((r) => r.dir)]);
+    const names = workspaceNames([this.ctx.repoDir, ...repos.map((r) => r.dir)]);
     const made: { trees: Worktrees; ref: WorktreeRef }[] = [];
     const fail = (why: string) => {
       // Fresh branches with nothing on them: nothing is lost taking them out again.
@@ -125,7 +125,7 @@ export class WorkerTrees {
    * workspace like `others`. Throws when it can't be written.
    */
   private writeBrief(primary: { path: string; branch: string; from?: string }, others: { name: string; project: string; from?: string }[]) {
-    const home = originRepo(this.ctx.dir) ?? path.basename(this.ctx.dir);
+    const home = originRepo(this.ctx.repoDir) ?? path.basename(this.ctx.repoDir);
     const line = (name: string, project: string, from?: string, note = '') => `- \`${name}/\`: ${project}${from ? `, cut from ${from}` : ''}${note}`;
     const brief = officePrompt(this.ctx.prompts, 'worker.repos', {
       branch: primary.branch,

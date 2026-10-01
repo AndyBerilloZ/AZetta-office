@@ -58,12 +58,14 @@ export function openPrompt(opts: PromptOptions) {
   ta.value = opts.initial ?? '';
   const wtBox = h('input', { type: 'checkbox', id: 'wt-toggle' }) as HTMLInputElement;
   wtBox.checked = worktreePref();
+  // On a workspace floor, a worktree is one of every checkout there, on one branch (see ProjectInfo.repos).
+  const across = store.project?.repos;
   const wtRow = opts.worktreeOption
     ? h(
         'label',
-        { for: 'wt-toggle', style: 'display:flex;gap:8px;align-items:center;margin:10px 0 0;font-weight:700;cursor:pointer', title: 'Isolate this worker on its own branch so parallel workers never collide' },
+        { for: 'wt-toggle', style: 'display:flex;gap:8px;align-items:center;margin:10px 0 0;font-weight:700;cursor:pointer', title: across?.length ? `A worktree of each of ${across.join(', ')}, all on one branch, with a pull request in each` : 'Isolate this worker on its own branch so parallel workers never collide' },
         wtBox,
-        '🌿 Work in its own git worktree & branch',
+        across?.length ? `🌿 Work in its own git worktrees & branch (${across.join(', ')})` : '🌿 Work in its own git worktree & branch',
     )
     : null;
   const repos = repoPicker(opts.worktreeOption ? opts.repoOptions : undefined, wtBox);
