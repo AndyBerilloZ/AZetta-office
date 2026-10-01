@@ -70,7 +70,8 @@ function azLauncher(): Launcher | null {
   try {
     const m = /"%~dp0\\?\.\.\\python\.exe"\s+-IBm\s+azure\.cli/i.exec(readFileSync(p, 'utf8'));
     const python = path.resolve(path.dirname(p), '..', 'python.exe');
-    if (m && existsSync(python)) return { file: python, pre: ['-IBm', 'azure.cli'] };
+    // -X utf8: piped, Python would write the console's code page, and "ó" in a title comes out as "�".
+    if (m && existsSync(python)) return { file: python, pre: ['-I', '-B', '-X', 'utf8', '-m', 'azure.cli'] };
   } catch {
     // not the MSI's
   }
