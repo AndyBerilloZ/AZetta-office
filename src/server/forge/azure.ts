@@ -40,12 +40,13 @@ export function azureRemote(url: string): AzureRemote | undefined {
   return undefined;
 }
 
-/** Turns az's stderr into something a person standing at the board can act on. */
+/** Turns az's stderr into something a person standing at the board can act on, keeping what az said. */
 function friendly(raw: string): string {
-  if (/az login|AADSTS|not logged in|Please run 'az login'|TF400813|401/i.test(raw)) return "az isn't signed in to Azure DevOps on the office's machine — run `az login` there";
-  if (/azure-devops.*extension|not in the 'az' command group|is misspelled or not recognized/i.test(raw)) return 'The Azure CLI needs its azure-devops extension: `az extension add --name azure-devops`';
-  if (/TF401019|does not exist|not found/i.test(raw)) return "az can't find this repository on Azure DevOps (check the remote and access)";
-  return raw;
+  const said = raw.replace(/^ERROR:\s*/i, '');
+  if (/az login|AADSTS|not logged in|TF400813/i.test(said)) return `az isn't signed in to Azure DevOps on the office's machine — run \`az login\` there (${said})`;
+  if (/azure-devops.*extension|not in the 'az' command group|is misspelled or not recognized/i.test(said)) return `The Azure CLI needs its azure-devops extension: \`az extension add --name azure-devops\` (${said})`;
+  if (/TF401019/i.test(said)) return `az can't find this repository on Azure DevOps — check the remote and your access (${said})`;
+  return said;
 }
 
 /** How to start az: the executable and the arguments that go before az's own. */
@@ -305,7 +306,8 @@ export class AzureDevOps implements Forge {
   async issueDetail(n: number, me?: string): Promise<GhIssueDetail> {
     const [item, viewer] = await Promise.all([az(['boards', 'work-item', 'show', '--id', String(n), '--organization', this.remote.org], this.dir).then(json), me ?? this.viewer()]);
     const f = item?.fields ?? {};
-    const comments = await this.invoke('wit', 'comments', { project: this.remote.project, workItemId: n }, { version: '7.1-preview.4' })
+    // Still a preview API; az's invoke takes the version as "7.1-preview", not "7.1-preview.4".
+    const comments = await this.invoke('wit', 'comments', { project: this.remote.project, workItemId: n }, { version: '7.1-preview' })
       .then((r: any) => (r?.comments ?? []).map((c: any): GhComment => ({ id: String(c.id), author: who(c.createdBy), body: text(c.text), createdAt: String(c.createdDate ?? ''), url: this.issueUrl(n) })))
       .catch(() => [] as GhComment[]);
     return { number: n, state: CLOSED_STATES.has(String(f['System.State'] ?? '').toLowerCase()) ? 'CLOSED' : 'OPEN', body: text(f['System.Description']), comments, viewer };
@@ -371,7 +373,7 @@ export class AzureDevOps implements Forge {
   /** The project's tags, for the label picker. Asked again after a minute (or a failure). */
   repoLabels(): Promise<GhLabel[]> {
     if (!this.labelList || Date.now() - this.labelList.at > LABELS_MS) {
-      const list = this.invoke('wit', 'tags', { project: this.remote.project }, { version: '7.1-preview.1' }).then((r: any) => (r?.value ?? []).map((t: any) => ({ name: String(t.name), color: TAG_COLOR })));
+      const list = this.invoke('wit', 'tags', { project: this.remote.project }).then((r: any) => (r?.value ?? []).map((t: any) => ({ name: String(t.name), color: TAG_COLOR })));
       this.labelList = { at: Date.now(), list };
       list.catch(() => this.labelList?.list === list && (this.labelList = undefined));
     }
@@ -389,9 +391,9 @@ export class AzureDevOps implements Forge {
         return { labels: now.map((name) => ({ name, color: TAG_COLOR })) };
       }
       const route = { project: this.remote.project, repositoryId: this.remote.repo, pullRequestId: n };
-      for (const a of add) await this.invoke('git', 'pullRequestLabels', route, { method: 'POST', body: { name: a }, version: '7.1-preview.1' });
-      for (const r of remove) await this.invoke('git', 'pullRequestLabels', { ...route, labelIdOrName: r }, { method: 'DELETE', version: '7.1-preview.1' }).catch(() => undefined);
-      const list = await this.invoke('git', 'pullRequestLabels', route, { version: '7.1-preview.1' });
+      for (const a of add) await this.invoke('git', 'pullRequestLabels', route, { method: 'POST', body: { name: a } });
+      for (const r of remove) await this.invoke('git', 'pullRequestLabels', { ...route, labelIdOrName: r }, { method: 'DELETE' }).catch(() => undefined);
+      const list = await this.invoke('git', 'pullRequestLabels', route);
       void this.refreshPulls();
       return { labels: (list?.value ?? []).map((l: any) => ({ name: String(l.name), color: TAG_COLOR })) };
     } catch (err) {
@@ -454,7 +456,8 @@ export class AzureDevOps implements Forge {
     this.onIssues(this.issues);
     try {
       const fields = ['System.Id', 'System.Title', 'System.State', 'System.WorkItemType', 'System.AssignedTo', 'System.CreatedBy', 'System.CreatedDate', 'System.ChangedDate', 'System.Tags', 'System.CommentCount', 'System.Description'];
-      const wiql = `SELECT ${fields.map((f) => `[${f}]`).join(',')} FROM WorkItems WHERE [System.TeamProject] = @project AND [System.WorkItemType] IN (${ITEM_TYPES.map((t) => `'${t}'`).join(',')}) ORDER BY [System.ChangedDate] DESC`;
+      // --project scopes the query; a [System.TeamProject] clause on top of it comes back empty.
+      const wiql = `SELECT ${fields.map((f) => `[${f}]`).join(',')} FROM WorkItems WHERE [System.WorkItemType] IN (${ITEM_TYPES.map((t) => `'${t}'`).join(',')}) ORDER BY [System.ChangedDate] DESC`;
       const items: any[] = json(await az(['boards', 'query', '--wiql', wiql, ...this.scope()], this.dir, 90_000)) ?? [];
       const all = items.map((i) => this.issueOf(i.fields ?? {}));
       // Open and closed separately, so old open items are never crowded out by recent closed ones.
