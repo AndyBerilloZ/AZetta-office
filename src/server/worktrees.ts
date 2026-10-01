@@ -52,6 +52,8 @@ export class Worktrees {
   constructor(
     private dir: string,
     private base = dir,
+    /** The branch worktrees are cut from and pull requests go to, when it isn't the one the checkout is on (see SubRepo.base): origin's copy of it. */
+    private branch?: string,
   ) {
     this.root = real(base);
   }
@@ -67,8 +69,8 @@ export class Worktrees {
    */
   create(slug: string, sub?: string, root = this.base): (Required<Omit<WorktreeRef, 'made'>> & { from?: string; note?: string }) | string {
     try {
-      const from = this.currentBranch();
-      const { base, note } = this.startPoint(from);
+      const from = this.branch ?? this.currentBranch();
+      const { base, note } = this.branch ? this.targetPoint(this.branch) : this.startPoint(from);
       const rel = path.join(WORKTREES_DIR, slug, sub ?? '');
       const branch = `${BRANCH_PREFIX}${slug}`;
       this.gitSync(['worktree', 'add', '-b', branch, path.resolve(root, rel), base]);
@@ -87,7 +89,7 @@ export class Worktrees {
   fetch(): Promise<void> | undefined {
     if (this.fetching) return this.fetching;
     if (Date.now() - this.fetchedAt < FETCH_FRESH_MS) return undefined;
-    const from = this.currentBranch();
+    const from = this.branch ?? this.currentBranch();
     if (!from || !this.hasOrigin()) return undefined;
     // Never stop to ask for a password: there's nobody at the office's terminal to type it.
     const env = { ...process.env, GIT_TERMINAL_PROMPT: '0' };
@@ -135,6 +137,21 @@ export class Worktrees {
     // Both moved on: the PR goes to origin's, so start there and say what's left behind.
     const n = Number(this.gitSync(['rev-list', '--count', head, '--not', remote]));
     return { base: remote, note: `starts from origin/${from}, without the ${n} commit${n === 1 ? '' : 's'} on ${from} that origin doesn't have` };
+  }
+
+  /**
+   * Where a worktree starts when the floor names the branch (see SubRepo.base): origin's copy of it,
+   * whatever the checkout is on; the local branch of that name, or HEAD, when origin hasn't got it.
+   */
+  private targetPoint(branch: string): { base: string; note?: string } {
+    for (const ref of [`refs/remotes/origin/${branch}`, `refs/heads/${branch}`]) {
+      try {
+        return { base: this.gitSync(['rev-parse', '--verify', '--quiet', `${ref}^{commit}`]) };
+      } catch {
+        // not there
+      }
+    }
+    return { base: this.gitSync(['rev-parse', 'HEAD']), note: `starts from HEAD: neither origin nor this checkout has a ${branch} branch` };
   }
 
   private isAncestor(a: string, b: string): boolean {

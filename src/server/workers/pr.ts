@@ -5,7 +5,7 @@ import path from 'node:path';
 import type { WorkerInfo } from '../../shared/protocol.js';
 import { DESK_BY_ID } from '../../shared/layout.js';
 import { isBusy } from '../../shared/status.js';
-import { gh } from '../github.js';
+import { forgeFor, type Forge } from '../forge/index.js';
 import type { GhAs } from '../signins.js';
 import { Worktrees } from '../worktrees.js';
 import { run } from './process.js';
@@ -19,30 +19,15 @@ const PR_TASK_MAX = 2500;
 const RELATED_START = '<!-- agent-office:related -->';
 const RELATED_END = '<!-- /agent-office:related -->';
 
-async function findOpenPr(branch: string, cwd: string): Promise<{ number: number; url: string } | undefined> {
-  const out = await gh(['pr', 'list', '--head', branch, '--state', 'open', '--limit', '1', '--json', 'number,url'], cwd);
-  const found = (JSON.parse(out || '[]') as { number: number; url: string }[])[0];
-  return found ? { number: found.number, url: found.url } : undefined;
-}
-
-/** `gh pr create` for a pushed branch; resolves to the new pull request. */
-async function createPr(branch: string, base: string | undefined, title: string, body: string, cwd: string, as?: GhAs): Promise<{ number: number; url: string }> {
-  const out = await gh(['pr', 'create', '--head', branch, ...(base ? ['--base', base] : []), '--title', title, '--body', body], cwd, 60_000, as?.env);
-  const url = out.trim().split('\n').pop() ?? '';
-  const number = Number(/\/pull\/(\d+)/.exec(url)?.[1]);
-  if (!number) throw new Error(`gh did not return a pull request URL (${truncate(out, 120)})`);
-  return { number, url };
-}
-
 /** owner/name#12 for a pull request on GitHub (which links it with its title), else its URL. */
 function prRef(url: string): string {
   const m = /github\.com\/([^/]+\/[^/]+)\/pull\/(\d+)/.exec(url);
   return m ? `${m[1]}#${m[2]}` : url;
 }
 
-/** The list of a change's pull requests across repositories, for the description of the one at `self`. */
-export function relatedBlock(prs: { repo?: string; url: string }[], self: string, branch: string): string {
-  const lines = prs.map((p) => `- ${p.repo ? `**${p.repo}**: ` : ''}${prRef(p.url)}${p.url === self ? ' (this one)' : ''}`);
+/** The list of a change's pull requests across repositories, for the description of the one at `self`. `ref` is how its forge names it (see Forge.prRef). */
+export function relatedBlock(prs: { repo?: string; url: string; ref?: string }[], self: string, branch: string): string {
+  const lines = prs.map((p) => `- ${p.repo ? `**${p.repo}**: ` : ''}${p.ref ?? prRef(p.url)}${p.url === self ? ' (this one)' : ''}`);
   return [RELATED_START, `**One change across ${prs.length} repositories**, each on \`${branch}\`: review and merge them together.`, '', ...lines, RELATED_END].join('\n');
 }
 
@@ -110,7 +95,8 @@ export class WorkerPrs {
       const commits = (await run('git', ['log', '--reverse', '--format=%h %s', `${wt.base}..${branch}`], cwd)).split('\n').filter(Boolean);
       const dirty = (await run('git', ['status', '--porcelain'], cwd)) !== '';
       if (!commits.length) return dirty ? `${info.name} hasn't committed anything yet — ask it to commit first` : `${info.name} has no commits on ${branch} yet`;
-      const open = await findOpenPr(branch, cwd);
+      const forge = forgeFor(this.ctx.repoDir);
+      const open = await forge.findOpenPr(branch, cwd, as);
       if (open) {
         info.pr = open;
         this.ctx.persist();
@@ -119,7 +105,7 @@ export class WorkerPrs {
       await run('git', ['push', '-u', 'origin', branch], cwd, 90_000, as?.env);
       const base = await this.pushedBranch([wt.from, this.ctx.trees.currentBranch()], branch);
       const { title, body } = draftPr(info, commits, by);
-      const { number, url } = await createPr(branch, base, title, body, cwd, as);
+      const { number, url } = await forge.createPr(branch, base, title, body, cwd, as);
       info.pr = { number, url };
       this.ctx.persist();
       return { prs: [{ number, url, existed: false, dirty }], failed: [] };
@@ -150,18 +136,20 @@ export class WorkerPrs {
     if (gone.length) return `${info.name}'s worktree${gone.length > 1 ? 's' : ''} of ${gone.map((p) => p.name).join(', ')} ${gone.length > 1 ? 'are' : 'is'} gone`;
     info.prOpening = true;
     this.ctx.emit(w);
-    const prs: (OpenedPr & { cwd: string })[] = [];
+    const prs: (OpenedPr & { cwd: string; forge: Forge })[] = [];
     const failed: string[] = [];
     const uncommitted: string[] = [];
     try {
       for (const p of parts) {
         const cwd = path.join(this.ctx.dir, p.path);
+        // Each repository's own forge: a change can span GitHub and Azure DevOps.
+        const forge = forgeFor(p.dir);
         try {
           const dirty = (await run('git', ['status', '--porcelain'], cwd)) !== '';
-          const known = p.pr ?? (await findOpenPr(p.branch, cwd));
+          const known = p.pr ?? (await forge.findOpenPr(p.branch, cwd, as));
           if (known) {
             p.set(known);
-            prs.push({ repo: p.name, ...known, existed: true, dirty, cwd });
+            prs.push({ repo: p.name, ...known, existed: true, dirty, cwd, forge });
             continue;
           }
           const commits = (await run('git', ['log', '--reverse', '--format=%h %s', `${p.base}..${p.branch}`], cwd)).split('\n').filter(Boolean);
@@ -172,10 +160,10 @@ export class WorkerPrs {
           await run('git', ['push', '-u', 'origin', p.branch], cwd, 90_000, as?.env);
           const base = await this.pushedBranch([p.from, new Worktrees(p.dir).currentBranch()], p.branch, p.dir);
           const { title, body } = draftPr(info, commits, by, p.own ? undefined : { home });
-          const pr = await createPr(p.branch, base, title, body, cwd, as);
+          const pr = await forge.createPr(p.branch, base, title, body, cwd, as);
           p.set(pr);
           this.ctx.persist();
-          prs.push({ repo: p.name, ...pr, existed: false, dirty, cwd });
+          prs.push({ repo: p.name, ...pr, existed: false, dirty, cwd, forge });
         } catch (err) {
           failed.push(`Couldn't open a PR in ${p.name}: ${(err as Error).message}`);
         }
@@ -185,18 +173,19 @@ export class WorkerPrs {
         return uncommitted.length ? `${info.name} hasn't committed anything yet in ${uncommitted.join(', ')} — ask it to commit first` : `${info.name} has no commits on ${wt.branch} yet in any of its repositories`;
       }
       if (prs.length > 1 && prs.some((p) => !p.existed)) {
+        const listed = prs.map((p) => ({ repo: p.repo, url: p.url, ref: p.forge.prRef(p.url) }));
         for (const p of prs) {
           try {
-            const body = await gh(['pr', 'view', p.url, '--json', 'body', '--jq', '.body'], p.cwd, 30_000, as?.env);
-            const next = withRelated(body, relatedBlock(prs, p.url, wt.branch));
-            if (next !== body) await gh(['pr', 'edit', p.url, '--body', next], p.cwd, 60_000, as?.env);
+            const body = await p.forge.pullBody(p.url, p.cwd, as);
+            const next = withRelated(body, relatedBlock(listed, p.url, wt.branch));
+            if (next !== body) await p.forge.setPullBody(p.url, next, p.cwd, as);
           } catch (err) {
             failed.push(`Couldn't list the other pull requests on ${p.repo} #${p.number}: ${(err as Error).message}`);
           }
         }
       }
       this.ctx.persist();
-      return { prs: prs.map(({ cwd: _, ...p }) => p), failed };
+      return { prs: prs.map(({ cwd: _, forge: __, ...p }) => p), failed };
     } finally {
       info.prOpening = false;
       if (this.ctx.workers.get(info.id) === w) this.ctx.emit(w);

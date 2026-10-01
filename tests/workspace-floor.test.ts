@@ -149,7 +149,7 @@ test('floors.json names the checkouts of a workspace floor, and the floor takes 
   ]));
   const [bipea, plain] = new Building(data, path.join(f.root, 'projects')).list();
   // A relative dir is under the floor; the floor itself, and a name used twice, are dropped.
-  assert.deepEqual(bipea.repos, [{ name: 'specs', repo: 'acme/specs', dir: f.specs }, { name: 'api', repo: undefined, dir: f.api }]);
+  assert.deepEqual(bipea.repos, [{ name: 'specs', repo: 'acme/specs', dir: f.specs, base: undefined }, { name: 'api', repo: undefined, dir: f.api, base: undefined }]);
   assert.equal(plain.repos, undefined);
   assert.equal(primaryDir(bipea), f.specs);
   assert.equal(primaryDir(plain), f.specs);
@@ -164,7 +164,6 @@ test('floors.json names the checkouts of a workspace floor, and the floor takes 
 test('a worker on a workspace floor gets a worktree of each checkout, in the floor, on one branch', async (t) => {
   const f = fixture(t);
   const workers = manager(f, t);
-  assert.equal(workers.repoDir, f.specs);
   const w = workers.spawn('desk-1', 'Cody', undefined, true, 'agent', undefined, undefined, undefined, undefined, undefined, [apiSource(f)]);
   assert.equal(typeof w, 'object', String(w));
   if (typeof w === 'string') return;

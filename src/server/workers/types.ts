@@ -25,6 +25,8 @@ export interface RepoSource {
   repo?: string;
   /** Its checkout. */
   dir: string;
+  /** The branch its worktree is cut from and its pull request goes to, when the floor names one (see SubRepo.base). */
+  base?: string;
 }
 
 /** A pull request 'worker.pr' opened, or found already open, for a worker's branch. */
@@ -163,6 +165,8 @@ export interface WorkerContext {
   readonly repoDir: string;
   /** Git plumbing for it, with worktrees under `dir`. */
   readonly trees: Worktrees;
+  /** The rest of a workspace floor's checkouts (see FloorDef.repos), fetched along with the main one before a hire. */
+  readonly subTrees: Worktrees[];
   readonly workers: Map<string, Worker>;
   readonly events: WorkerEvents;
   /** The office's prompts, as set in ⚙️ Settings (see prompts.ts). */

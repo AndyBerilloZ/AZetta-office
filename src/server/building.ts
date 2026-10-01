@@ -6,6 +6,7 @@ import { FLOOR_PALETTES, MAX_FLOORS, normalizeRepo, sameRepo } from '../shared/f
 import type { CloneProgress, ProjectsDirState, RepoChoice } from '../shared/protocol.js';
 import { CloneRun, dropLog, whyCloneFailed, type CloneEnd, type CloneRunOptions } from './clone.js';
 import { gh } from './github.js';
+import { validSubRepos, type SubRepo } from './subrepos.js';
 
 /** A floor as floors.json keeps it. */
 export interface FloorDef {
@@ -25,35 +26,7 @@ export interface FloorDef {
   addedAt: number;
 }
 
-/** One checkout inside a workspace floor (see FloorDef.repos). */
-export interface SubRepo {
-  /** Its folder's name, as the worker sees it in its workspace ("specs"). */
-  name: string;
-  /** owner/name on GitHub, when it's there. */
-  repo?: string;
-  /** The checkout, absolute. */
-  dir: string;
-}
-
-/** The checkout a floor's branch and worktrees come from: the floor itself, or a workspace floor's first project. */
-export function primaryDir(def: Pick<FloorDef, 'dir' | 'repos'>): string {
-  return def.repos?.[0]?.dir ?? def.dir;
-}
-
-/** The checkouts of a workspace floor as floors.json names them, dropping anything that isn't a folder of its own. */
-function validSubRepos(raw: unknown, floorDir: string): SubRepo[] | undefined {
-  if (!Array.isArray(raw)) return undefined;
-  const seen = new Set<string>();
-  const repos: SubRepo[] = [];
-  for (const r of raw) {
-    const dir = typeof r?.dir === 'string' && r.dir ? path.resolve(floorDir, r.dir) : undefined;
-    const name = typeof r?.name === 'string' && r.name ? r.name.slice(0, 64) : dir && path.basename(dir);
-    if (!dir || !name || seen.has(name.toLowerCase()) || path.resolve(dir) === path.resolve(floorDir)) continue;
-    seen.add(name.toLowerCase());
-    repos.push({ name, repo: normalizeRepo(r.repo), dir });
-  }
-  return repos.length ? repos : undefined;
-}
+export { primaryDir, type SubRepo } from './subrepos.js';
 
 /** A projects folder picked in ⚙️ Settings (or with --projects), as projects-folder.json keeps it. */
 interface PickedDir {

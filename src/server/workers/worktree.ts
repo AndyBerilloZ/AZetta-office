@@ -69,6 +69,15 @@ export class WorkerTrees {
   constructor(private ctx: WorkerContext) {}
 
   /**
+   * Fetches the branch the project is on, so a worktree made next starts from what's on its forge
+   * now (see Worktrees.fetch); on a workspace floor, every checkout's. Undefined when there's nothing to wait for.
+   */
+  fetchBase(): Promise<void> | undefined {
+    const fetching = [this.ctx.trees, ...this.ctx.subTrees].flatMap((t) => t.fetch() ?? []);
+    return fetching.length ? Promise.all(fetching).then(() => undefined) : undefined;
+  }
+
+  /**
    * The workspace of a worker across repositories: `.agent-office/worktrees/<slug>`, with a worktree of
    * this floor's project and of each of `repos` in it, all on office/<slug>, and a brief for the agent
    * (the 'worker.repos' prompt, as CLAUDE.md and AGENTS.md). All or nothing: when one repository
@@ -104,7 +113,7 @@ export class WorkerTrees {
     made.push({ trees: this.ctx.trees, ref: primary });
     const others: WorkerRepo[] = [];
     for (const [i, r] of repos.entries()) {
-      const trees = new Worktrees(r.dir);
+      const trees = new Worktrees(r.dir, r.dir, r.base);
       const wt = trees.create(slug, names[i + 1], this.ctx.dir);
       if (typeof wt === 'string') return fail(`${r.name}: ${wt}`);
       if (wt.note) notes.push(`${names[i + 1]} ${wt.note}`);
