@@ -141,9 +141,9 @@ export class WorkerPrs {
   private async openPrs(w: Worker, by: string, as?: GhAs): Promise<{ prs: OpenedPr[]; failed: string[] } | string> {
     const { info } = w;
     const wt = info.worktree!;
-    const home = originRepo(this.ctx.dir);
+    const home = originRepo(this.ctx.repoDir);
     const parts = [
-      { name: path.basename(wt.path), dir: this.ctx.dir, ...wt, pr: info.pr, own: true, set: (pr: { number: number; url: string }) => (info.pr = pr) },
+      { name: path.basename(wt.path), dir: this.ctx.repoDir, ...wt, pr: info.pr, own: true, set: (pr: { number: number; url: string }) => (info.pr = pr) },
       ...info.repos!.map((r) => ({ ...r, own: false, set: (pr: { number: number; url: string }) => (r.pr = pr) })),
     ];
     const gone = parts.filter((p) => !existsSync(path.join(this.ctx.dir, p.path)));
@@ -204,7 +204,7 @@ export class WorkerPrs {
   }
 
   /** The first of these branches that exists on origin (of `dir`'s repository), for a PR base. None: gh picks the default branch. */
-  private async pushedBranch(candidates: (string | undefined)[], not: string, dir = this.ctx.dir): Promise<string | undefined> {
+  private async pushedBranch(candidates: (string | undefined)[], not: string, dir = this.ctx.repoDir): Promise<string | undefined> {
     for (const c of candidates) {
       if (!c || c === not) continue;
       try {

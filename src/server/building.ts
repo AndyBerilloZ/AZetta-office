@@ -14,9 +14,45 @@ export interface FloorDef {
   /** owner/name on GitHub. */
   repo?: string;
   dir: string;
+  /**
+   * A workspace floor: `dir` is a folder holding several checkouts (specs, api, web…), not a checkout
+   * itself. Workers hired in their own worktree get one of each, as a worker across floors does; the
+   * first is the floor's main project, whose branch the floor shows. Set by hand in floors.json.
+   */
+  repos?: SubRepo[];
   palette: number;
   addedBy: string;
   addedAt: number;
+}
+
+/** One checkout inside a workspace floor (see FloorDef.repos). */
+export interface SubRepo {
+  /** Its folder's name, as the worker sees it in its workspace ("specs"). */
+  name: string;
+  /** owner/name on GitHub, when it's there. */
+  repo?: string;
+  /** The checkout, absolute. */
+  dir: string;
+}
+
+/** The checkout a floor's branch and worktrees come from: the floor itself, or a workspace floor's first project. */
+export function primaryDir(def: Pick<FloorDef, 'dir' | 'repos'>): string {
+  return def.repos?.[0]?.dir ?? def.dir;
+}
+
+/** The checkouts of a workspace floor as floors.json names them, dropping anything that isn't a folder of its own. */
+function validSubRepos(raw: unknown, floorDir: string): SubRepo[] | undefined {
+  if (!Array.isArray(raw)) return undefined;
+  const seen = new Set<string>();
+  const repos: SubRepo[] = [];
+  for (const r of raw) {
+    const dir = typeof r?.dir === 'string' && r.dir ? path.resolve(floorDir, r.dir) : undefined;
+    const name = typeof r?.name === 'string' && r.name ? r.name.slice(0, 64) : dir && path.basename(dir);
+    if (!dir || !name || seen.has(name.toLowerCase()) || path.resolve(dir) === path.resolve(floorDir)) continue;
+    seen.add(name.toLowerCase());
+    repos.push({ name, repo: normalizeRepo(r.repo), dir });
+  }
+  return repos.length ? repos : undefined;
 }
 
 /** A projects folder picked in ⚙️ Settings (or with --projects), as projects-folder.json keeps it. */
@@ -406,6 +442,7 @@ export class Building {
           name: typeof s.name === 'string' && s.name ? s.name.slice(0, 100) : path.basename(s.dir),
           repo: normalizeRepo(s.repo),
           dir: s.dir,
+          repos: validSubRepos(s.repos, s.dir),
           palette: Number.isInteger(s.palette) && (s.palette as number) >= 0 ? (s.palette as number) : 0,
           addedBy: typeof s.addedBy === 'string' ? s.addedBy : '?',
           addedAt: typeof s.addedAt === 'number' ? s.addedAt : Date.now(),

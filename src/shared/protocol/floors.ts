@@ -19,8 +19,14 @@ import type { JailState, WorkerInfo } from './workers.js';
 export interface ProjectInfo {
   name: string;
   dir: string;
+  /** The branch the floor's checkout is on: on a workspace floor, its main project's. */
   branch?: string;
   remote?: string;
+  /**
+   * A workspace floor: `dir` holds these checkouts (by folder name, the main project first) rather
+   * than being one. A worker in its own worktree gets a worktree of each (see WorkerInfo.repos).
+   */
+  repos?: string[];
   agentCmd: string;
   defaultProvider: AgentProvider;
   agentProviders: AgentProvider[];

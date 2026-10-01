@@ -15,10 +15,11 @@ export interface HookEnv {
   token: string;
 }
 
-/** Another floor's repository for a worker to work in too (see WorkerInfo.repos). */
+/** Another repository for a worker to work in too (see WorkerInfo.repos): another floor's project, or one of its own workspace floor's checkouts. */
 export interface RepoSource {
+  /** The floor whose project it is, or `<floor>:<name>` for a checkout of a workspace floor (see FloorDef.repos), which is no floor of its own. */
   floor: string;
-  /** The floor's name, for messages. */
+  /** The floor's name, or the checkout's folder, for messages. */
   name: string;
   /** owner/name on GitHub, when known. */
   repo?: string;
@@ -156,9 +157,11 @@ export interface WorkerHandle<S = unknown> {
  * project, its workers, and what they all do to one. Narrow on purpose: they never import the manager.
  */
 export interface WorkerContext {
-  /** The floor's project checkout. */
+  /** The floor's dir: its project checkout, or on a workspace floor the folder its checkouts are in. Worktree paths are relative to it. */
   readonly dir: string;
-  /** Git plumbing for it. */
+  /** The checkout the floor's branch and its workers' worktrees come from: `dir`, or a workspace floor's main project. */
+  readonly repoDir: string;
+  /** Git plumbing for it, with worktrees under `dir`. */
   readonly trees: Worktrees;
   readonly workers: Map<string, Worker>;
   readonly events: WorkerEvents;

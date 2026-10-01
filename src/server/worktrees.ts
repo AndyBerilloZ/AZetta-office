@@ -36,17 +36,24 @@ export interface ListedWorktree {
   head: string;
 }
 
-/** Git plumbing for the worktrees the office makes for its workers: hiring, sending home and pruning. */
+/**
+ * Git plumbing for the worktrees the office makes for its workers: hiring, sending home and pruning.
+ * `dir` is the checkout git runs in; worktree paths are relative to `base`, which is the floor's dir:
+ * the checkout itself, or on a workspace floor (see FloorDef.repos) the folder the checkouts are in.
+ */
 export class Worktrees {
-  /** The project dir with symlinks resolved, so it compares with the paths git prints. */
+  /** `base` with symlinks resolved, so it compares with the paths git prints. */
   private readonly root: string;
   private fetchedAt = 0;
   private fetching?: Promise<void>;
   /** The last fetch's error, so the office's log says it once rather than on every hire. */
   private fetchError?: string;
 
-  constructor(private dir: string) {
-    this.root = real(dir);
+  constructor(
+    private dir: string,
+    private base = dir,
+  ) {
+    this.root = real(base);
   }
 
   /**
@@ -58,7 +65,7 @@ export class Worktrees {
    * `slug`, which is in `root` (the worker's own floor, when that isn't this project). The path it
    * returns is relative to `root`.
    */
-  create(slug: string, sub?: string, root = this.dir): (Required<Omit<WorktreeRef, 'made'>> & { from?: string; note?: string }) | string {
+  create(slug: string, sub?: string, root = this.base): (Required<Omit<WorktreeRef, 'made'>> & { from?: string; note?: string }) | string {
     try {
       const from = this.currentBranch();
       const { base, note } = this.startPoint(from);
@@ -164,7 +171,7 @@ export class Worktrees {
    */
   async branchOf(wt: WorktreeRef): Promise<string | undefined> {
     if (!wt.path) return undefined;
-    const abs = path.join(this.dir, wt.path);
+    const abs = path.join(this.base, wt.path);
     if (!existsSync(abs)) return undefined;
     const b = await this.git(['rev-parse', '--abbrev-ref', 'HEAD'], abs).catch(() => '');
     return b && b !== 'HEAD' ? b : undefined;
@@ -206,7 +213,7 @@ export class Worktrees {
    */
   async restore(wt: WorktreeRef): Promise<{ from: LostBranch } | { error: string }> {
     if (!wt.path) return { error: 'it has no folder to put back' };
-    const abs = path.join(this.dir, wt.path);
+    const abs = path.join(this.base, wt.path);
     try {
       // Git still lists the deleted folder, and won't check its branch out anywhere else while it does.
       await this.git(['worktree', 'prune']);
@@ -254,7 +261,7 @@ export class Worktrees {
    * before it don't count as unpushed, even once GitHub has deleted the branch.
    */
   async inspect(wt: WorktreeRef, landed?: string): Promise<WorktreeState> {
-    const abs = wt.path ? path.join(this.dir, wt.path) : undefined;
+    const abs = wt.path ? path.join(this.base, wt.path) : undefined;
     const exists = !!abs && existsSync(abs);
     const state: WorktreeState = { exists, dirty: 0, ahead: 0, unpushed: 0 };
     try {
@@ -276,7 +283,7 @@ export class Worktrees {
   async remove(wt: WorktreeRef, cleanup: 'worktree' | 'all'): Promise<string | undefined> {
     try {
       if (wt.path) {
-        const abs = path.join(this.dir, wt.path);
+        const abs = path.join(this.base, wt.path);
         if (existsSync(abs)) {
           try {
             await this.git(['worktree', 'remove', '--force', '--force', abs]);
