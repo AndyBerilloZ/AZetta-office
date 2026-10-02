@@ -15,6 +15,23 @@ export interface SubRepo {
   base?: string;
 }
 
+/** Where a floor's issues live when not on its checkout's forge (see FloorDef.issues): a Windshift workspace. */
+export interface IssuesDef {
+  kind: 'windshift';
+  /** The instance, like https://jira.example.com; else WINDSHIFT_URL on the office's machine. */
+  url?: string;
+  /** The workspace's key ("BI"). */
+  workspace: string;
+}
+
+/** A floor's issues as floors.json names them; undefined for anything that isn't a tracker the office knows. */
+export function validIssues(raw: unknown): IssuesDef | undefined {
+  const r = raw as Partial<IssuesDef> | undefined;
+  if (!r || r.kind !== 'windshift' || typeof r.workspace !== 'string' || !/^[A-Za-z][A-Za-z0-9]{0,19}$/.test(r.workspace)) return undefined;
+  const url = typeof r.url === 'string' && /^https?:\/\/[^\s/]+$/.test(r.url.replace(/\/+$/, '')) ? r.url.replace(/\/+$/, '') : undefined;
+  return { kind: 'windshift', url, workspace: r.workspace.toUpperCase() };
+}
+
 /** The checkout a floor's branch and worktrees come from: the floor itself, or a workspace floor's first project. */
 export function primaryDir(def: { dir: string; repos?: SubRepo[] }): string {
   return def.repos?.[0]?.dir ?? def.dir;

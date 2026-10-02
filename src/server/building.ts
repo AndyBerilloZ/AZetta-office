@@ -6,7 +6,7 @@ import { FLOOR_PALETTES, MAX_FLOORS, normalizeRepo, sameRepo } from '../shared/f
 import type { CloneProgress, ProjectsDirState, RepoChoice } from '../shared/protocol.js';
 import { CloneRun, dropLog, whyCloneFailed, type CloneEnd, type CloneRunOptions } from './clone.js';
 import { gh } from './github.js';
-import { validSubRepos, type SubRepo } from './subrepos.js';
+import { validIssues, validSubRepos, type IssuesDef, type SubRepo } from './subrepos.js';
 
 /** A floor as floors.json keeps it. */
 export interface FloorDef {
@@ -21,12 +21,14 @@ export interface FloorDef {
    * first is the floor's main project, whose branch the floor shows. Set by hand in floors.json.
    */
   repos?: SubRepo[];
+  /** Where its issues live when not on its checkout's forge: a Windshift workspace. Set by hand in floors.json. */
+  issues?: IssuesDef;
   palette: number;
   addedBy: string;
   addedAt: number;
 }
 
-export { primaryDir, type SubRepo } from './subrepos.js';
+export { primaryDir, type IssuesDef, type SubRepo } from './subrepos.js';
 
 /** A projects folder picked in ⚙️ Settings (or with --projects), as projects-folder.json keeps it. */
 interface PickedDir {
@@ -416,6 +418,7 @@ export class Building {
           repo: normalizeRepo(s.repo),
           dir: s.dir,
           repos: validSubRepos(s.repos, s.dir),
+          issues: validIssues(s.issues),
           palette: Number.isInteger(s.palette) && (s.palette as number) >= 0 ? (s.palette as number) : 0,
           addedBy: typeof s.addedBy === 'string' ? s.addedBy : '?',
           addedAt: typeof s.addedAt === 'number' ? s.addedAt : Date.now(),

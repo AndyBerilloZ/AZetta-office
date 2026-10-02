@@ -231,6 +231,7 @@ export class Floor {
         this.sendLandedHome();
         ctx.pullsChanged(this);
       },
+      def.issues,
     );
     // The 📋 task queue seats workers by itself: it watches the workers and links PRs from GitHub.
     this.queue = new TaskQueue(dataDir, this.workers, !!this.project.branch, {

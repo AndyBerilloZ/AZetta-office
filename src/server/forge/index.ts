@@ -3,9 +3,14 @@ import { execFileSync } from 'node:child_process';
 import type { GhIssue, GhPull, GhState } from '../../shared/protocol.js';
 import { GitHub } from '../github.js';
 import { AzureDevOps, azureRemote } from './azure.js';
+import { CompositeForge } from './composite.js';
 import type { Forge, ForgeKind } from './types.js';
+import { Windshift, type WindshiftConfig } from './windshift.js';
 
-export type { Forge, ForgeKind, ForgePr } from './types.js';
+export type { Forge, ForgeKind, ForgePr, IssueSource } from './types.js';
+
+/** Where a floor's issues live when not on its checkout's forge (see FloorDef.issues). */
+export type IssuesConfig = WindshiftConfig;
 
 /** The forge a remote URL points at: Azure DevOps for dev.azure.com and *.visualstudio.com, GitHub for everything else (gh is the office's default). */
 export function forgeKindOfUrl(url: string | undefined): ForgeKind {
@@ -27,10 +32,15 @@ export function originUrl(dir: string): string | undefined {
 
 const quiet = () => {};
 
-/** A floor's forge: its boards tell `onIssues` and `onPulls` whenever they change. */
-export function openForge(dir: string, onIssues: (s: GhState<GhIssue>) => void, onPulls: (s: GhState<GhPull>) => void): Forge {
+/**
+ * A floor's forge: its boards tell `onIssues` and `onPulls` whenever they change. With `issues`,
+ * the issues board comes from that tracker instead, and the pull requests from the checkout's forge.
+ */
+export function openForge(dir: string, onIssues: (s: GhState<GhIssue>) => void, onPulls: (s: GhState<GhPull>) => void, issues?: IssuesConfig): Forge {
   const url = originUrl(dir);
-  return forgeKindOfUrl(url) === 'azure' ? new AzureDevOps(dir, url!, onIssues, onPulls) : new GitHub(dir, onIssues, onPulls);
+  const prs = forgeKindOfUrl(url) === 'azure' ? new AzureDevOps(dir, url!, issues ? quiet : onIssues, onPulls) : new GitHub(dir, issues ? quiet : onIssues, onPulls);
+  if (!issues) return prs;
+  return new CompositeForge(prs, new Windshift(issues, onIssues));
 }
 
 const plain = new Map<string, Forge>();
