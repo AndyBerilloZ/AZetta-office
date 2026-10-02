@@ -8,7 +8,8 @@ import { primaryDir, type FloorDef } from './building.js';
 import { excludeFromGit } from './config.js';
 import { agentProviders, configuredProvider } from './agents.js';
 import { WorkerManager, workedMs, type HookEnv, type RepoSource, type RunAs } from './workers.js';
-import { GitHub, MergeWatch } from './github.js';
+import { MergeWatch } from './github.js';
+import { openForge, type Forge } from './forge/index.js';
 import type { GhAs } from './signins.js';
 import { TaskQueue } from './queue.js';
 import { Changes } from './changes.js';
@@ -118,7 +119,8 @@ export class Floor {
   readonly dir: string;
   readonly project: ProjectInfo;
   readonly workers: WorkerManager;
-  readonly github: GitHub;
+  /** The project's forge (GitHub, Azure DevOps…): its boards, and what the office does to them. Named for the first one. */
+  readonly github: Forge;
   readonly queue: TaskQueue;
   readonly changes: Changes;
   readonly decor: Decor;
@@ -212,8 +214,9 @@ export class Floor {
     );
     this.workers.wing = () => this.plan.wing;
 
-    this.github = new GitHub(
-      def.dir,
+    // The boards are the main project's: on a workspace floor, the first checkout's.
+    this.github = openForge(
+      primaryDir(def),
       (state) => ctx.emit(this, { t: 'gh.issues', state }),
       (state) => {
         ctx.emit(this, { t: 'gh.pulls', state });
@@ -328,7 +331,7 @@ export class Floor {
    * `floor` is `<floor>:<name>`: no floor of its own, so nothing looks one up.
    */
   subRepos(): RepoSource[] {
-    return (this.def.repos ?? []).slice(1).map((r) => ({ floor: `${this.id}:${r.name}`, name: r.name, repo: r.repo, dir: r.dir }));
+    return (this.def.repos ?? []).slice(1).map((r) => ({ floor: `${this.id}:${r.name}`, name: r.name, repo: r.repo, dir: r.dir, base: r.base }));
   }
 
   /** Pull request `n` merged (`by` someone, from the PR window): the gong rings, once per PR. */

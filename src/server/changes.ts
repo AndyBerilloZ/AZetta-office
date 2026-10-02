@@ -2,6 +2,7 @@ import { execFile } from 'node:child_process';
 import { readFile, realpath, stat } from 'node:fs/promises';
 import path from 'node:path';
 import type { ImageResult } from './decor.js';
+import { forgeFor } from './forge/index.js';
 import { changedImageType, type ChangedFile, type ChangeStatus, type ChangesState } from '../shared/protocol.js';
 
 // What a worker changed, for the Changes window at its desk: the files it touched and their diff,
@@ -319,10 +320,14 @@ export class Changes {
       const remote = remotes.includes('origin') ? 'origin' : remotes[0];
       if (!remote) return 'This project has no git remote to push to';
       await git(['push', '-u', remote, s.branch], t.cwd, 120_000, env);
-      const r = await run('gh', ['pr', 'create', '--head', s.branch, '--base', s.prBase, '--title', title.trim(), '--body', body], t.cwd, 120_000, env);
-      const url = r.out.trim().split('\n').pop() ?? '';
-      if (r.code !== 0 || !/^https?:\/\//.test(url)) throw new GitError(reason(r, url || 'gh pr create failed'));
-      const number = Number(/\/(\d+)$/.exec(url)?.[1] ?? 0);
+      // On the checkout's own forge (GitHub, Azure DevOps…), as whoever pressed the button where that forge knows them.
+      let pr: { number: number; url: string };
+      try {
+        pr = await forgeFor(t.cwd).createPr(s.branch, s.prBase, title.trim(), body, t.cwd, env ? { key: '', env } : undefined);
+      } catch (err) {
+        throw new GitError((err as Error).message);
+      }
+      const { number, url } = pr;
       this.opened.set(openedKey(repo, s.branch), { number, url });
       this.events.toast(`${who} opened a pull request for ${t.name}: ${url}`, 'info');
       (t.refreshGitHub ?? this.events.refreshGitHub)();

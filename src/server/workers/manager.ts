@@ -46,8 +46,6 @@ export class WorkerManager {
   private workers = new Map<string, Worker>();
   private statePath: string;
   private trees: Worktrees;
-  /** The rest of a workspace floor's checkouts, fetched along with the main one before a hire. */
-  private subTrees: Worktrees[];
   private agentPath: string | null = null;
   readonly defaultProvider: AgentProvider;
   /** What each provider set up on this floor, for its launches (see ProviderAdapter.prepare). */
@@ -90,13 +88,10 @@ export class WorkerManager {
     private runAs?: RunAs,
     /** The DSH profile a DeepSeek Harness worker boots (default "acp"). */
     dshProfile: string = DSH_PROFILE_DEFAULT,
-    /** A workspace floor's checkouts (see FloorDef.repos): the first is where the floor's branch and its workers' worktrees come from. */
-    subRepos: { dir: string }[] = [],
+    subRepos: { dir: string; base?: string }[] = [], // a workspace floor's checkouts (see FloorDef.repos): the first is where its branch and worktrees come from
   ) {
     this.defaultProvider = configuredProvider(agentCmd);
-    const repoDir = subRepos[0]?.dir ?? dir;
-    this.trees = new Worktrees(repoDir, dir);
-    this.subTrees = subRepos.slice(1).map((r) => new Worktrees(r.dir));
+    this.trees = new Worktrees(subRepos[0]?.dir ?? dir, dir, subRepos[0]?.base);
     this.statePath = path.join(dataDir, 'workers.json');
     // bin/office-workers.js is also the office's MCP server, for the agents that take one.
     const floor: ProviderFloor = { dataDir, mcpScript: binScript('office-workers.js'), dshProfile };
@@ -106,8 +101,9 @@ export class WorkerManager {
     const self = this;
     this.ctx = {
       dir,
-      repoDir,
+      repoDir: subRepos[0]?.dir ?? dir,
       trees: this.trees,
+      subTrees: subRepos.slice(1).map((r) => new Worktrees(r.dir, r.dir, r.base)),
       workers: this.workers,
       events,
       prompts,
@@ -177,11 +173,6 @@ export class WorkerManager {
     return this.agentPath;
   }
 
-  /** The checkout the floor's branch and worktrees come from (see WorkerContext.repoDir). */
-  get repoDir(): string {
-    return this.ctx.repoDir;
-  }
-
   /** What an agent starts on when whoever starts it doesn't pick: the one set in ⚙️ Settings, or the office's --agent. */
   get officeDefault(): AgentChoice {
     const picked = this.prompts?.agent();
@@ -213,15 +204,9 @@ export class WorkerManager {
     }));
   }
 
-  /**
-   * Fetches the branch the project is on, so a worktree made next starts from what's on GitHub now
-   * (see Worktrees.fetch). Undefined when there's nothing to wait for.
-   */
+  /** Fetches what a worktree made next starts from (see WorkerTrees.fetchBase). Undefined when there's nothing to wait for. */
   fetchBase(): Promise<void> | undefined {
-    // On a workspace floor, every checkout a worktree is cut from.
-    const fetching = [this.trees, ...this.subTrees].map((t) => t.fetch()).filter((p) => p !== undefined);
-    if (!fetching.length) return undefined;
-    return Promise.all(fetching).then(() => undefined);
+    return this.worktrees.fetchBase();
   }
 
   deskOccupied(deskId: string): boolean {

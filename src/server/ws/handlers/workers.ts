@@ -1,6 +1,7 @@
 // Workers at their desks and the board agents at their kiosks: hiring them, their terminals, their
 // worktrees and pull requests.
 import { MAX_REPOS, type RepoSource } from '../../workers.js';
+import { primaryDir } from '../../subrepos.js';
 import { OPEN_CODE_MODEL_MAX } from '../../../shared/providers.js';
 import { isAgentEffort, isAgentProvider, type WorkerClientMsg } from '../../../shared/protocol.js';
 import { issueNumber, num, str } from '../../office/input.js';
@@ -33,7 +34,7 @@ export const workerHandlers = {
     for (const id of Array.isArray(msg.repos) ? [...new Set(msg.repos.slice(0, MAX_REPOS + 1).map((x) => str(x, 64)))] : []) {
       const other = ctx.floors.get(id);
       if (!other || other === floor) return ctx.warn(c, other ? "The worker's own floor's project is already in its workspace" : 'That project is no longer in the building');
-      repos.push({ floor: other.id, name: other.def.name, repo: other.def.repo, dir: other.workers.repoDir }, ...other.subRepos());
+      repos.push({ floor: other.id, name: other.def.name, repo: other.def.repo, dir: primaryDir(other.def), base: other.def.repos?.[0]?.base }, ...other.subRepos());
     }
     // A shell is theirs too: `claude auth login` or `gh auth login` typed there signs them in.
     const hire = () => {

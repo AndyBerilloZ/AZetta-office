@@ -1,5 +1,6 @@
 import { execFile } from 'node:child_process';
 import type { GhCheck, GhCloseReason, GhComment, GhIssue, GhIssueDetail, GhLabel, GhMergeMethod, GhPull, GhPullDetail, GhRepoInfo, GhReviewComment, GhState } from '../shared/protocol.js';
+import type { Forge, ForgePr } from './forge/types.js';
 import type { GhAs } from './signins.js';
 
 const REFRESH_MS = 90_000;
@@ -98,7 +99,8 @@ export class MergeWatch {
   }
 }
 
-export class GitHub {
+export class GitHub implements Forge {
+  readonly kind = 'github';
   issues: GhState<GhIssue> = { items: [], fetchedAt: 0, loading: false };
   pulls: GhState<GhPull> = { items: [], fetchedAt: 0, loading: false };
   private timer?: NodeJS.Timeout;
@@ -346,6 +348,37 @@ export class GitHub {
       }
       return { ...it, labels: r.labels };
     });
+  }
+
+  // --- Pull requests for a worker's branch (see workers/pr.ts), run in a worktree of the project ---
+
+  async findOpenPr(branch: string, cwd: string, as?: GhAs): Promise<ForgePr | undefined> {
+    const out = await gh(['pr', 'list', '--head', branch, '--state', 'open', '--limit', '1', '--json', 'number,url'], cwd, undefined, as?.env);
+    const found = (JSON.parse(out || '[]') as { number: number; url: string }[])[0];
+    return found ? { number: found.number, url: found.url } : undefined;
+  }
+
+  /** `gh pr create` for a pushed branch; resolves to the new pull request. */
+  async createPr(branch: string, base: string | undefined, title: string, body: string, cwd: string, as?: GhAs): Promise<ForgePr> {
+    const out = await gh(['pr', 'create', '--head', branch, ...(base ? ['--base', base] : []), '--title', title, '--body', body], cwd, 60_000, as?.env);
+    const url = out.trim().split('\n').pop() ?? '';
+    const number = Number(/\/pull\/(\d+)/.exec(url)?.[1]);
+    if (!number) throw new Error(`gh did not return a pull request URL (${out.trim().slice(0, 120)})`);
+    return { number, url };
+  }
+
+  pullBody(url: string, cwd: string, as?: GhAs): Promise<string> {
+    return gh(['pr', 'view', url, '--json', 'body', '--jq', '.body'], cwd, 30_000, as?.env);
+  }
+
+  async setPullBody(url: string, body: string, cwd: string, as?: GhAs): Promise<void> {
+    await gh(['pr', 'edit', url, '--body', body], cwd, 60_000, as?.env);
+  }
+
+  /** owner/name#12 for a pull request on GitHub (which links it with its title), else its URL. */
+  prRef(url: string): string {
+    const m = /github\.com\/([^/]+\/[^/]+)\/pull\/(\d+)/.exec(url);
+    return m ? `${m[1]}#${m[2]}` : url;
   }
 
   /** Assigns the issue to `as` (else the office's own gh), which moves it to In progress on the board. */
