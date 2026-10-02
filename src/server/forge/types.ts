@@ -6,6 +6,25 @@ import type { GhAs } from '../signins.js';
 
 export type ForgeKind = 'github' | 'azure';
 
+/**
+ * Where a floor's issues live when it isn't the forge its pull requests are on: a tracker of its
+ * own (Windshift), set per floor in floors.json (see FloorDef.issues). It fills the issues board and
+ * takes what the office does to an issue; the pull requests stay with the checkout's forge.
+ */
+export interface IssueSource {
+  readonly kind: string;
+  issues: GhState<GhIssue>;
+  stop(): void;
+  refreshIssues(): Promise<void>;
+  viewer(): Promise<string>;
+  issueDetail(n: number, me?: string): Promise<GhIssueDetail>;
+  comment(n: number, body: string): Promise<{ comment?: GhComment; error?: string }>;
+  close(n: number, opts: { comment?: string; reason?: GhCloseReason }): Promise<string | undefined>;
+  repoLabels(): Promise<GhLabel[]>;
+  setLabels(n: number, add: string[], remove: string[]): Promise<{ labels?: GhLabel[]; error?: string }>;
+  claim(issue: number): Promise<string | undefined>;
+}
+
 /** A pull request a forge opened, or found open, for a branch. */
 export interface ForgePr {
   number: number;
